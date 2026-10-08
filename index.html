@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Web Lab · 第一步</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">AGENT WEB LAB / 01</p>
+        <h1>从一次问答开始</h1>
+        <p>输入问题，观察它如何经过浏览器、后端，再到模型。</p>
+      </header>
+      <p id="mode" role="status">正在连接后端…</p>
+      <form id="question-form">
+        <label for="prompt">你的问题</label>
+        <textarea id="prompt" rows="7" maxlength="12000" required placeholder="粘贴一段代码，让模型解释它；也可以问：浏览器和后端分别做什么？"></textarea>
+        <button id="submit" type="submit">发送问题</button>
+      </form>
+      <p id="status" role="status" aria-live="polite">准备就绪。每次发送都是独立问答。</p>
+      <section aria-labelledby="answer-title">
+        <h2 id="answer-title">回答</h2>
+        <pre id="answer">回答会显示在这里。</pre>
+        <p id="metrics"></p>
+      </section>
+      <details>
+        <summary>查看这次请求与响应</summary>
+        <p>这里是浏览器与后端之间的 JSON。后端额外添加的模型指令见 server/llm.ts。</p>
+        <h3>浏览器 → 后端</h3><pre id="request">尚未发送</pre>
+        <h3>后端 → 浏览器</h3><pre id="response">尚未接收</pre>
+      </details>
+      <footer>第一步：单次模型问答 · 尚未加入历史消息、工具或 Agent Loop</footer>
+    </main>
+    <script type="module" src="/client/main.ts"></script>
+  </body>
+</html>
