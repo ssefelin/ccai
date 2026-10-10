@@ -18,4 +18,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.8 ui-monospac
 summary { cursor: pointer; font-weight: 600; }
 details pre { background: #f4f6f2; padding: 12px; border-radius: 6px; }
 footer { margin-top: 24px; font-size: 13px; }
+.secondary { background: #e6ece7; color: #20332e; margin-left: 10px; }
+.toggle { margin-top: 14px; font-weight: normal; }
+.message { padding: 14px; margin-top: 12px; background: #f4f6f2; border-radius: 7px; }
+.message.user { border-left: 3px solid #427660; }
+.message pre { margin-top: 6px; }
+#session { overflow-wrap: anywhere; font-size: 13px; color: #60716a; }
 @media (max-width: 600px) { main { margin: 24px auto; padding: 0 16px; } form, section, details { padding: 18px; } }
