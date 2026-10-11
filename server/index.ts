@@ -19,6 +19,27 @@ app.post('/api/ask', async (request, response) => {
     response.status(400).json({ error: error instanceof Error ? error.message : '消息格式无效。' });
     return;
   }
+  // 浏览器选择 SSE：一个 POST 请求逐条接收进度；普通 API 调用仍可取 JSON。
+  if (request.get('Accept')?.includes('text/event-stream')) {
+    response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-cache');
+    response.setHeader('X-Accel-Buffering', 'no');
+    response.flushHeaders();
+    const send = (data: unknown) => {
+      if (!response.destroyed && !response.writableEnded) response.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed && !response.writableEnded) response.write(': ping\n\n');
+    }, 15000);
+    try {
+      const result = await askModel(messages, send);
+      send({ type: 'result', result });
+    } finally {
+      clearInterval(heartbeat);
+      response.end();
+    }
+    return;
+  }
   try {
     response.json(await askModel(messages));
   } catch (error) {

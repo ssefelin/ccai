@@ -1,5 +1,6 @@
 import './style.css';
-import type { AskRequest, AskResponse, ChatMessage, ConfigResponse } from '../shared/api.ts';
+import type { AgentEvent, AskRequest, AskResponse, ChatMessage, ConfigResponse } from '../shared/api.ts';
+import { readEvents } from './stream.ts';
 
 // DOM 是浏览器暴露的页面对象；这些引用相当于拿到页面控件的句柄。
 const form = document.querySelector<HTMLFormElement>('#question-form')!;
@@ -11,6 +12,28 @@ const metrics = document.querySelector<HTMLElement>('#metrics')!;
 const requestView = document.querySelector<HTMLElement>('#request')!;
 const responseView = document.querySelector<HTMLElement>('#response')!;
 const modelView = document.querySelector<HTMLElement>('#model-request')!;
+const toolsView = document.querySelector<HTMLElement>('#tool-traces')!;
+const progressView = document.querySelector<HTMLElement>('#progress')!;
+const progress: string[] = [];
+const requests: AgentEvent[] = [];
+const toolResults: AgentEvent[] = [];
+function showProgress(event: AgentEvent) {
+  let text = '';
+  if (event.type === 'model_start') {
+    text = `第 ${event.round} 轮：等待模型决定下一步`;
+    requests.push(event);
+    modelView.textContent = JSON.stringify(requests.map(item => item.type === 'model_start' ? item.request : null), null, 2);
+  } else if (event.type === 'model_result') text = `第 ${event.round} 轮：模型提出 ${event.toolCalls} 个工具调用`;
+  else if (event.type === 'tool_start') text = `第 ${event.round} 轮：执行 ${event.name}，参数 ${event.arguments}`;
+  else if (event.type === 'tool_result') {
+    text = `第 ${event.round} 轮：${event.trace.name} ${event.trace.result.ok ? '成功' : '失败'}`;
+    toolResults.push(event);
+    toolsView.textContent = JSON.stringify(toolResults.map(item => item.type === 'tool_result' ? item.trace : null), null, 2);
+  } else text = `停止：${event.reason === 'completed' ? '完成' : event.reason === 'max_rounds' ? '达到轮数上限' : '失败'}`;
+  progress.push(text);
+  progressView.textContent = progress.join('\n');
+  status.textContent = text;
+}
 const clear = document.querySelector<HTMLButtonElement>('#clear')!;
 const includeHistory = document.querySelector<HTMLInputElement>('#include-history')!;
 const messageList = document.querySelector<HTMLElement>('#messages')!;
@@ -43,6 +66,9 @@ clear.addEventListener('click', () => {
   answer.textContent = '回答会显示在这里。';
   metrics.textContent = '';
   requestView.textContent = responseView.textContent = modelView.textContent = '尚未发送';
+  toolsView.textContent = '尚未调用工具。';
+  progress.length = requests.length = toolResults.length = 0;
+  progressView.textContent = '尚未开始。';
   status.textContent = '会话已清空。下一次请求没有历史消息。';
 });
 
@@ -69,6 +95,9 @@ form.addEventListener('submit', async (event) => {
   requestView.textContent = JSON.stringify(body, null, 2);
   responseView.textContent = '等待响应…';
   modelView.textContent = '等待后端返回组装后的模型请求…';
+  toolsView.textContent = '等待结果…';
+  progress.length = requests.length = toolResults.length = 0;
+  progressView.textContent = '任务已提交…';
   answer.textContent = '等待回答…';
   metrics.textContent = '';
   status.textContent = '请求已发送，等待后端处理…';
@@ -78,27 +107,39 @@ form.addEventListener('submit', async (event) => {
   try {
     const response = await fetch('/api/ask', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(70000),
+      signal: AbortSignal.timeout(195000),
     });
-    const data = await response.json();
-    responseView.textContent = JSON.stringify(data, null, 2);
-    if (!response.ok) throw new Error(data.error || '请求失败');
-    const result = data as AskResponse;
-    modelView.textContent = JSON.stringify(result.modelRequest, null, 2);
+    if (!response.ok) {
+      const data = await response.json();
+      responseView.textContent = JSON.stringify(data, null, 2);
+      throw new Error(data.error || '请求失败');
+    }
+    if (!response.body) throw new Error('浏览器未收到进度流。');
+    let result: AskResponse | undefined;
+    for await (const event of readEvents(response.body)) {
+      if (event.type === 'result') result = event.result;
+      else showProgress(event);
+    }
+    if (!result) throw new Error('连接已中断，未收到最终结果。');
+    responseView.textContent = JSON.stringify(result, null, 2);
+    modelView.textContent = JSON.stringify(result.modelRequests, null, 2);
+    toolsView.textContent = result.toolTraces.length ? JSON.stringify(result.toolTraces, null, 2) : '本次模型直接回答，未调用工具。';
     // 只有成功的完整问答进入历史。失败时保留输入，便于重试。
-    messages.push(current, { role: 'assistant', content: result.answer });
-    renderMessages();
-    if (prompt.value.trim() === text) prompt.value = '';
+    if (result.stopReason === 'completed') {
+      messages.push(current, { role: 'assistant', content: result.answer });
+      renderMessages();
+      if (prompt.value.trim() === text) prompt.value = '';
+    }
     answer.textContent = result.answer; // 以文本显示，避免把模型输出作为 HTML 执行。
     metrics.textContent = `模型：${result.model} · 后端耗时：${result.durationMs} ms · ` +
       (result.usage ? `输入 ${result.usage.inputTokens} / 输出 ${result.usage.outputTokens} / 总计 ${result.usage.totalTokens} tokens` : '演示模式，无模型 token 用量');
-    status.textContent = `完成。本次发送 ${body.messages.length} 条消息；可切换历史开关比较上下文。`;
+    status.textContent = `${result.stopReason === 'completed' ? '完成' : result.stopReason === 'max_rounds' ? '达到轮数上限，未完成' : '失败'} · ${result.rounds} 轮模型请求 · ${result.toolTraces.length} 次工具执行`;
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : '请求失败，请重试';
     answer.textContent = '本次未获得回答。';
-    modelView.textContent = '请求失败，未获得后端确认的模型输入。';
+    // 保留已收到的实时轨迹，便于定位连接中断发生在哪一轮。
     if (responseView.textContent === '等待响应…') responseView.textContent = status.textContent;
   } finally {
     submit.disabled = false;
