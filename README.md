@@ -3,13 +3,14 @@ ccai coding agent i
 
 ## 学习入口
 
-当前进入第 4 步：Agent Loop。
+当前进入第 5 步：修改并验证。
 
 - [八步学习路线](./LEARNING_ROADMAP.md)
 - [第一步思考题（对应之前的独立问答版本）](./STEP_01_QUESTIONS.md)
 - [第二步讲解、实验与思考题](./STEP_02_CONTEXT.md)
 - [第三步工具调用讲解、实验与思考题](./STEP_03_TOOLS.md)
 - [第四步循环、SSE 与思考题](./STEP_04_LOOP.md)
+- [第五步修改确认、测试与思考题](./STEP_05_VERIFY.md)
 
 ### 启动与验证
 
@@ -46,8 +47,12 @@ node --env-file-if-exists=.env --experimental-strip-types server/index.ts
 
 浏览器历史 → POST /api/ask → 校验上下文 → 模型决定行动 → 列文件/读文件 → 工具结果加入上下文 → 下一轮模型请求 → 完成、达到上限或失败。
 
-当前接口使用 `{ messages: [{ role, content }] }`。`modelRequests` 展示模型请求，`toolTraces` 展示工具参数与结果，`events` 是进度记录；`rounds` 和 `stopReason` 表示轮数与停止原因。`modelRequest` 保留第一次请求。会话只在页面内存中，刷新会清空。最多 6 轮、总等待 3 分钟；没有写文件、执行测试或持久任务。
+当前接口使用 `{ messages: [{ role, content }] }`。`modelRequests` 展示模型请求，`toolTraces` 展示工具参数与结果，`events` 是进度记录；`rounds` 和 `stopReason` 表示轮数与停止原因，`verification` 表示测试证据。`modelRequest` 保留第一次请求。会话只在页面内存中，刷新会清空。最多6轮、总等待10分钟（含确认），每次确认最多2分钟；没有持久任务。
+
+第五步试试“修复 counter.ts 的加法错误，先测试，再修改，最后重新测试”。修改与测试都要在页面点击确认。仅允许修改 counter.ts；固定测试位于 practice-tests/，不提供任意命令。初始练习故意失败，应用测试 tests/ 仍应通过。已经批准的写入不会自动撤销。
 
 页面以 SSE 实时接收任务事件；普通调用仍返回 JSON。流开始后的错误由最终结果表达，即使 HTTP 状态为 200，也需要检查 stopReason。
 
 练习提示：发送“找出练习目录里处理名称的函数并解释”。你可以把小型练习文本文件放在 practice/，不需要粘贴内容。不要在练习目录放密钥或私密文件。
+
+练习目录每次调用工具都会重新访问，运行中新增文件无需重启。支持 `.ts`、`.js`、`.cpp`、`.cs`、`.c`、`.h`、`.hpp`、`.md`、`.txt`、`.json`，要求 UTF-8、单文件不超过 16 KiB。修改后端代码才需要重启。若聊天中保留了旧文件列表，可以要求“重新列出文件”，或清空会话再询问。

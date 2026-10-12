@@ -18,7 +18,7 @@ export async function readPracticeFile(value: unknown, root = practiceRoot): Pro
     if (typeof value !== 'string' || !value || value.length > 200 || /[:\x00]/.test(value)) throw new Error('需要有效的相对文件路径。');
     const parts = value.replaceAll('\\', '/').split('/');
     if (parts.some(part => !part || part.startsWith('.') || !/^[\p{L}\p{N}_ .-]+$/u.test(part))) throw new Error('只允许练习目录内的相对路径，不允许隐藏文件或路径穿越。');
-    if (!/\.(ts|js|cpp|c|h|hpp|md|txt|json)$/i.test(value)) throw new Error('仅允许读取支持的文本文件类型。');
+    if (!/\.(ts|js|cpp|cs|c|h|hpp|md|txt|json)$/i.test(value)) throw new Error('仅允许读取支持的文本文件类型。');
     if ((await lstat(root)).isSymbolicLink()) throw new Error('练习目录不能是符号链接。');
     const canonicalRoot = await realpath(root);
     let candidate = canonicalRoot;
@@ -74,7 +74,7 @@ export async function listPracticeFiles(root = practiceRoot): Promise<ToolTrace[
         const full = path.join(actual, entry.name);
         if ((await lstat(full)).isSymbolicLink()) continue;
         if (entry.isDirectory()) await visit(full, depth + 1);
-        else if (entry.isFile() && /\.(ts|js|cpp|c|h|hpp|md|txt|json)$/i.test(entry.name)) files.push(path.relative(canonicalRoot, full).split(path.sep).join('/'));
+        else if (entry.isFile() && /\.(ts|js|cpp|cs|c|h|hpp|md|txt|json)$/i.test(entry.name)) files.push(path.relative(canonicalRoot, full).split(path.sep).join('/'));
       }
     }
     await visit(canonicalRoot, 0);

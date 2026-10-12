@@ -18,7 +18,18 @@ export interface ToolTrace {
   callId: string;
   name: string;
   arguments: string;
-  result: { ok: true; path: string; content: string } | { ok: true; files: string[]; truncated: boolean } | { ok: false; error: string };
+  result: { ok: true; path: string; content: string } | { ok: true; files: string[]; truncated: boolean }
+    | { ok: true; path: string; applied: true }
+    | { ok: true; suite: string; passed: boolean; exitCode: number | null; output: string }
+    | { ok: false; error: string; approvalDenied?: boolean };
+}
+export interface ApprovalProposal {
+  id: string;
+  action: 'edit' | 'test';
+  path: string;
+  before: string;
+  after: string;
+  diff: string;
 }
 export type StopReason = 'completed' | 'max_rounds' | 'error';
 export type AgentEvent =
@@ -26,6 +37,7 @@ export type AgentEvent =
   | { type: 'model_result'; round: number; toolCalls: number }
   | { type: 'tool_start'; round: number; name: string; arguments: string }
   | { type: 'tool_result'; round: number; trace: ToolTrace }
+  | { type: 'approval_required'; round: number; proposal: ApprovalProposal }
   | { type: 'stop'; round: number; reason: StopReason; message: string };
 export type StreamEvent = AgentEvent | { type: 'result'; result: AskResponse };
 export interface AskResponse {
@@ -40,5 +52,6 @@ export interface AskResponse {
   events: AgentEvent[];
   rounds: number;
   stopReason: StopReason;
+  verification: 'not_run' | 'passed' | 'failed' | 'stale';
 }
 export interface ConfigResponse { mode: Mode; model: string; ready: boolean }

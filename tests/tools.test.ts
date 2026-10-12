@@ -4,13 +4,22 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
-import { readPracticeFile, executeReadCall } from '../server/tools.ts';
+import { readPracticeFile, executeReadCall, listPracticeFiles } from '../server/tools.ts';
 import { askModel } from '../server/llm.ts';
 
 test('只读边界：有效文本、路径穿越、绝对路径、隐藏文件、缺失文件和大小限制', async () => {
   const fixture = await mkdtemp(path.join(tmpdir(), 'ccai-tools-'));
   try {
     await writeFile(path.join(fixture, 'small.ts'), 'export const value = 1;');
+    await writeFile(path.join(fixture, 'RoomFlow.cs'), 'public class RoomFlow {}');
+    const listing = await listPracticeFiles(fixture);
+    assert.ok(listing.ok && 'files' in listing && listing.files.includes('RoomFlow.cs'));
+    assert.equal((await readPracticeFile('RoomFlow.cs', fixture)).ok, true);
+    // 同一进程中新增文件，下一次列出/读取应立即可见。
+    await writeFile(path.join(fixture, 'AddedLater.cs'), 'public class AddedLater {}');
+    const updated = await listPracticeFiles(fixture);
+    assert.ok(updated.ok && 'files' in updated && updated.files.includes('AddedLater.cs'));
+    assert.equal((await readPracticeFile('AddedLater.cs', fixture)).ok, true);
     await writeFile(path.join(fixture, 'large.ts'), 'x'.repeat(16385));
     await writeFile(path.join(fixture, 'invalid.txt'), Buffer.from([0xff]));
     const valid = await readPracticeFile('small.ts', fixture);
@@ -77,7 +86,7 @@ test('模型循环：调用 ID 匹配、工具结果回传、后续仍可调用�
     assert.equal(requests.length, 2);
     assert.equal(requests[0].tools[0].name, 'read_file');
     assert.equal(requests[1].tool_choice, 'auto');
-    assert.equal(requests[1].tools.length, 2);
+    assert.equal(requests[1].tools.length, 4);
     const output = requests[1].input.find((item: any) => item.type === 'function_call_output');
     assert.equal(output.call_id, 'call-test');
     assert.match(JSON.parse(output.output).content, /return a \/ b/);

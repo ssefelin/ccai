@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { askModel, getConfig } from './llm.ts';
 import { validateMessages } from './context.ts';
+import { approvals } from './approvals.ts';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -9,6 +10,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT �
 app.use(express.json({ limit: '512kb' }));
 
 app.get('/api/config', (_request, response) => { response.json(getConfig()); });
+app.post('/api/approvals/:id', (request, response) => {
+  if (typeof request.body?.approved !== 'boolean') { response.status(400).json({ error: '需要 approved 布尔值。' }); return; }
+  const found = approvals.decide(request.params.id, request.body.approved);
+  response.status(found ? 200 : 404).json(found ? { ok: true } : { error: '确认请求已过期或已处理。' });
+});
 
 app.post('/api/ask', async (request, response) => {
   // HTTP 输入来自外部，不能因为 TypeScript 有类型就信任它。
@@ -31,11 +37,15 @@ app.post('/api/ask', async (request, response) => {
     const heartbeat = setInterval(() => {
       if (!response.destroyed && !response.writableEnded) response.write(': ping\n\n');
     }, 15000);
+    const controller = new AbortController();
+    const disconnect = () => controller.abort();
+    response.on('close', disconnect);
     try {
-      const result = await askModel(messages, send);
+      const result = await askModel(messages, send, { signal: controller.signal, confirm: (proposal, publish, signal) => approvals.request(proposal, publish, signal) });
       send({ type: 'result', result });
     } finally {
       clearInterval(heartbeat);
+      response.off('close', disconnect);
       response.end();
     }
     return;

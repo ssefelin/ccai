@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Agent Web Lab · 第四步</title>
+    <title>Agent Web Lab · 第五步</title>
   </head>
   <body>
     <main>
       <header>
-        <p class="eyebrow">AGENT WEB LAB / 04</p>
-        <h1>观察 Agent 如何逐步行动</h1>
-        <p>试试“找出练习目录里处理名称的函数并解释”。Agent 可以列出文件、读取代码，再决定下一步。</p>
+        <p class="eyebrow">AGENT WEB LAB / 05</p>
+        <h1>审阅修改，再用测试验证</h1>
+        <p>试试“修复 counter.ts 的加法错误，先测试，再修改，最后重新测试”。操作执行前会等待你的确认。</p>
       </header>
       <p id="mode" role="status">正在连接后端…</p>
       <p id="session"></p>
@@ -27,6 +27,17 @@
         <label class="toggle"><input id="include-history" type="checkbox" checked /> 携带历史消息（关闭后只发送本次问题）</label>
       </form>
       <p id="status" role="status" aria-live="polite">准备就绪。</p>
+      <section id="approval-panel" hidden aria-labelledby="approval-title">
+        <h2 id="approval-title">等待确认</h2>
+        <pre id="approval-diff"></pre>
+        <details><summary>查看完整修改前后内容</summary>
+          <h3>修改前</h3><pre id="approval-before"></pre>
+          <h3>修改后</h3><pre id="approval-after"></pre>
+        </details>
+        <button id="approve" type="button">确认</button>
+        <button id="reject" class="secondary" type="button">拒绝并停止</button>
+        <p id="approval-status" role="status"></p>
+      </section>
       <section aria-labelledby="progress-title">
         <h2 id="progress-title">实时执行进度</h2>
         <pre id="progress" role="log" aria-live="polite">尚未开始。</pre>
@@ -34,12 +45,13 @@
       <section aria-labelledby="tools-title">
         <h2 id="tools-title">本次工具调用</h2>
         <pre id="tool-traces">尚未调用工具。</pre>
-        <p>只允许列出和读取 practice/ 文本文件，最多 6 轮模型请求。演示模式模拟决策，工具真实执行。</p>
+        <p>可以读 practice/，仅能修改 counter.ts 并运行固定加法测试。最多6轮；修改与测试都需确认。</p>
       </section>
       <section aria-labelledby="answer-title">
         <h2 id="answer-title">回答</h2>
         <pre id="answer">回答会显示在这里。</pre>
         <p id="metrics"></p>
+        <p id="verification">尚未运行测试。</p>
       </section>
       <details>
         <summary>查看这次请求与响应</summary>
@@ -48,7 +60,7 @@
         <h3>后端 → 模型（演示模式不实际发送）</h3><pre id="model-request">尚未接收</pre>
         <h3>后端 → 浏览器</h3><pre id="response">尚未接收</pre>
       </details>
-      <footer>第四步：Agent Loop · 仅查询代码，尚未加入修改与测试执行</footer>
+      <footer>第五步：修改并验证 · 固定练习范围，不提供任意命令执行</footer>
     </main>
     <script type="module" src="/client/main.ts"></script>
   </body>
