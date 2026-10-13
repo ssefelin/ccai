@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { askModel, getConfig } from './llm.ts';
 import { validateMessages } from './context.ts';
 import { approvals } from './approvals.ts';
+import { defaultPolicy, tasks, validatePolicy } from './runtime.ts';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -10,6 +11,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT �
 app.use(express.json({ limit: '512kb' }));
 
 app.get('/api/config', (_request, response) => { response.json(getConfig()); });
+app.get('/api/policy', (_request, response) => { response.json({ defaults: defaultPolicy, readRoot: 'practice/', editTarget: 'counter.ts', confirmationMs: 120000, taskTimeoutMs: 600000, testTimeoutMs: 10000 }); });
+app.post('/api/tasks/:id/cancel', (request, response) => {
+  const found = tasks.cancel(request.params.id);
+  response.status(found ? 200 : 404).json(found ? { requested: true } : { error: '任务已结束或不存在。' });
+});
 app.post('/api/approvals/:id', (request, response) => {
   if (typeof request.body?.approved !== 'boolean') { response.status(400).json({ error: '需要 approved 布尔值。' }); return; }
   const found = approvals.decide(request.params.id, request.body.approved);
@@ -19,12 +25,20 @@ app.post('/api/approvals/:id', (request, response) => {
 app.post('/api/ask', async (request, response) => {
   // HTTP 输入来自外部，不能因为 TypeScript 有类型就信任它。
   let messages;
+  let policy;
   try {
     messages = validateMessages(request.body?.messages);
+    policy = validatePolicy(request.body?.policy);
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : '消息格式无效。' });
     return;
   }
+  let task;
+  try { task = tasks.start(); }
+  catch { response.status(409).json({ error: '已有3个任务运行，请先取消或等待完成。' }); return; }
+  const controller = task.controller;
+  const disconnect = () => tasks.cancel(task.id);
+  response.on('close', disconnect);
   // 浏览器选择 SSE：一个 POST 请求逐条接收进度；普通 API 调用仍可取 JSON。
   if (request.get('Accept')?.includes('text/event-stream')) {
     response.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -37,21 +51,20 @@ app.post('/api/ask', async (request, response) => {
     const heartbeat = setInterval(() => {
       if (!response.destroyed && !response.writableEnded) response.write(': ping\n\n');
     }, 15000);
-    const controller = new AbortController();
-    const disconnect = () => controller.abort();
-    response.on('close', disconnect);
     try {
-      const result = await askModel(messages, send, { signal: controller.signal, confirm: (proposal, publish, signal) => approvals.request(proposal, publish, signal) });
+      send({ type: 'task_started', taskId: task.id, policy });
+      const result = await askModel(messages, send, { policy, signal: controller.signal, confirm: (proposal, publish, signal) => approvals.request(proposal, publish, signal) });
       send({ type: 'result', result });
     } finally {
       clearInterval(heartbeat);
       response.off('close', disconnect);
+      task.dispose();
       response.end();
     }
     return;
   }
   try {
-    response.json(await askModel(messages));
+    response.json(await askModel(messages, undefined, { policy, signal: controller.signal }));
   } catch (error) {
     // 不把第三方错误详情或密钥输出到页面。
     const config = getConfig();
@@ -59,6 +72,9 @@ app.post('/api/ask', async (request, response) => {
       : error instanceof Error && error.message.startsWith('模型') ? error.message
       : '模型请求失败，请检查后端网络、API 密钥、模型访问权限或额度。';
     response.status(502).json({ error: message });
+  } finally {
+    response.off('close', disconnect);
+    task.dispose();
   }
 });
 app.use('/api', (_request, response) => { response.status(404).json({ error: '接口不存在。' }); });

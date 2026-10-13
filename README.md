@@ -3,7 +3,7 @@ ccai coding agent i
 
 ## 学习入口
 
-当前进入第 5 步：修改并验证。
+当前进入第 6 步：权限与失败处理。
 
 - [八步学习路线](./LEARNING_ROADMAP.md)
 - [第一步思考题（对应之前的独立问答版本）](./STEP_01_QUESTIONS.md)
@@ -11,6 +11,7 @@ ccai coding agent i
 - [第三步工具调用讲解、实验与思考题](./STEP_03_TOOLS.md)
 - [第四步循环、SSE 与思考题](./STEP_04_LOOP.md)
 - [第五步修改确认、测试与思考题](./STEP_05_VERIFY.md)
+- [第六步权限、预算、取消与思考题](./STEP_06_PERMISSIONS.md)
 
 ### 启动与验证
 
@@ -50,6 +51,10 @@ node --env-file-if-exists=.env --experimental-strip-types server/index.ts
 当前接口使用 `{ messages: [{ role, content }] }`。`modelRequests` 展示模型请求，`toolTraces` 展示工具参数与结果，`events` 是进度记录；`rounds` 和 `stopReason` 表示轮数与停止原因，`verification` 表示测试证据。`modelRequest` 保留第一次请求。会话只在页面内存中，刷新会清空。最多6轮、总等待10分钟（含确认），每次确认最多2分钟；没有持久任务。
 
 第五步试试“修复 counter.ts 的加法错误，先测试，再修改，最后重新测试”。修改与测试都要在页面点击确认。仅允许修改 counter.ts；固定测试位于 practice-tests/，不提供任意命令。初始练习故意失败，应用测试 tests/ 仍应通过。已经批准的写入不会自动撤销。
+
+第六步新增执行模式、轮数/工具次数/token阈值，以及取消按钮。只读模式后端禁止修改和测试；逐次确认模式延续第五步操作。用量阈值按 API 返回后检查，不是精确费用上限。已完成的写入不随取消撤销。
+
+`GET /api/policy` 查看后端默认边界；SSE 的 `task_started` 返回任务 ID，`POST /api/tasks/:id/cancel` 请求取消。任务结束后 ID 失效，等待确认和任务记录会释放；最多3个并发任务。测试进程不继承密钥并限制文件访问，但仍是本地教学约束，不是完整的恶意代码隔离环境。
 
 页面以 SSE 实时接收任务事件；普通调用仍返回 JSON。流开始后的错误由最终结果表达，即使 HTTP 状态为 200，也需要检查 stopReason。
 

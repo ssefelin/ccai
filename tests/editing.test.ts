@@ -64,3 +64,43 @@ test('真实固定测试在隔离练习中先失败，确认修复后通过，�
     await rm(fixture, { recursive: true, force: true });
   }
 });
+
+test('测试进程不能继承父进程秘密、读目录外文件、写文件或启动子进程', async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'ccai-isolation-'));
+  try {
+    const practice = path.join(fixture, 'practice'), tests = path.join(fixture, 'practice-tests');
+    await mkdir(practice); await mkdir(tests);
+    await writeFile(path.join(practice, 'counter.ts'), 'export const value = 1;');
+    const outside = path.join(fixture, 'outside.txt'); await writeFile(outside, 'test marker');
+    process.env.CCAI_TEST_SECRET = 'fake-parent-secret';
+    const suite = path.join(tests, 'isolation.test.ts');
+    await writeFile(suite, `import {test} from 'node:test'; import assert from 'node:assert/strict'; import {readFileSync,writeFileSync} from 'node:fs'; import {execFileSync} from 'node:child_process'; test('isolation',()=>{ assert.equal(process.env.CCAI_TEST_SECRET,undefined); assert.throws(()=>readFileSync(${JSON.stringify(outside)})); assert.throws(()=>writeFileSync(${JSON.stringify(path.join(practice, 'new.txt'))},'x')); assert.throws(()=>execFileSync(process.execPath,['-e','console.log(1)'])); });`);
+    const result = await runPracticeTests(async () => true, AbortSignal.timeout(15000), practice, suite);
+    assert.ok(result.ok && 'passed' in result && result.passed);
+  } finally {
+    delete process.env.CCAI_TEST_SECRET;
+    assert.equal(path.dirname(path.resolve(fixture)), path.resolve(tmpdir()));
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+test('取消信号终止正在执行的测试子进程', async () => {
+  const fixture = await mkdtemp(path.join(tmpdir(), 'ccai-cancel-'));
+  try {
+    const practice = path.join(fixture, 'practice'), tests = path.join(fixture, 'practice-tests');
+    await mkdir(practice); await mkdir(tests);
+    await writeFile(path.join(practice, 'counter.ts'), 'export const value = 1;');
+    const suite = path.join(tests, 'slow.test.ts');
+    await writeFile(suite, "import {test} from 'node:test'; test('slow',async()=>{await new Promise(r=>setTimeout(r,30000));});");
+    const controller = new AbortController();
+    const waiting = runPracticeTests(async () => true, controller.signal, practice, suite);
+    const timer = setTimeout(() => controller.abort(), 300);
+    const started = Date.now();
+    const result = await waiting; clearTimeout(timer);
+    assert.ok(Date.now() - started < 5000);
+    assert.ok(!result.ok || 'passed' in result && !result.passed);
+  } finally {
+    assert.equal(path.dirname(path.resolve(fixture)), path.resolve(tmpdir()));
+    await rm(fixture, { recursive: true, force: true });
+  }
+});

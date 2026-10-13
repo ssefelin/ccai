@@ -80,11 +80,11 @@ test('读取失败成为上下文，模型可在下一轮改用有效路径', as
   });
 });
 
-test('无效工具后模型返回空答案仍有停止事件；保留错误前的轨迹', async () => {
+test('无效工具被后端拒绝，仍有停止事件并保留轨迹', async () => {
   await withModel(round => round === 1 ? call(round, 'shell') : [], async () => {
     const result = await askModel([{ role: 'user', content: '测试错误' }]);
     assert.equal(result.toolTraces[0].result.ok, false);
-    assert.equal(result.stopReason, 'error');
+    assert.equal(result.stopReason, 'denied');
     assert.equal(result.events.at(-1)?.type, 'stop');
   });
 });

@@ -24,4 +24,5 @@ footer { margin-top: 24px; font-size: 13px; }
 .message.user { border-left: 3px solid #427660; }
 .message pre { margin-top: 6px; }
 #session { overflow-wrap: anywhere; font-size: 13px; color: #60716a; }
+select, input[type="number"] { padding: 8px; max-width: 100%; border: 1px solid #acbdb1; border-radius: 6px; font: inherit; margin-bottom: 12px; }
 @media (max-width: 600px) { main { margin: 24px auto; padding: 0 16px; } form, section, details { padding: 18px; } }

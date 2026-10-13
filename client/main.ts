@@ -1,6 +1,7 @@
 import './style.css';
 import type { AgentEvent, ApprovalProposal, AskRequest, AskResponse, ChatMessage, ConfigResponse } from '../shared/api.ts';
 import { readEvents } from './stream.ts';
+import { stopLabels } from '../shared/api.ts';
 
 // DOM 是浏览器暴露的页面对象；这些引用相当于拿到页面控件的句柄。
 const form = document.querySelector<HTMLFormElement>('#question-form')!;
@@ -23,6 +24,24 @@ const approvalStatus = document.querySelector<HTMLElement>('#approval-status')!;
 const approve = document.querySelector<HTMLButtonElement>('#approve')!;
 const reject = document.querySelector<HTMLButtonElement>('#reject')!;
 const verificationView = document.querySelector<HTMLElement>('#verification')!;
+const cancel = document.querySelector<HTMLButtonElement>('#cancel')!;
+const policyMode = document.querySelector<HTMLSelectElement>('#policy-mode')!;
+const roundLimit = document.querySelector<HTMLInputElement>('#round-limit')!;
+const toolLimit = document.querySelector<HTMLInputElement>('#tool-limit')!;
+const tokenLimit = document.querySelector<HTMLInputElement>('#token-limit')!;
+let taskId: string | undefined;
+cancel.addEventListener('click', async () => {
+  if (!taskId || cancel.disabled) return;
+  cancel.disabled = true;
+  status.textContent = '已请求取消，等待后端停止结果…';
+  try {
+    const response = await fetch(`/api/tasks/${taskId}/cancel`, { method: 'POST', signal: AbortSignal.timeout(10000) });
+    if (!response.ok) status.textContent = '任务可能已结束，等待最终结果…';
+  } catch {
+    status.textContent = '取消请求未送达，尚不能确认后端停止，可重试。';
+    cancel.disabled = false;
+  }
+});
 let pendingApproval: ApprovalProposal | undefined;
 function showApproval(proposal: ApprovalProposal) {
   pendingApproval = proposal;
@@ -62,7 +81,10 @@ const requests: AgentEvent[] = [];
 const toolResults: AgentEvent[] = [];
 function showProgress(event: AgentEvent) {
   let text = '';
-  if (event.type === 'model_start') {
+  if (event.type === 'task_started') {
+    taskId = event.taskId; cancel.disabled = false;
+    text = `任务开始：${event.policy.mode === 'read_only' ? '只读' : '逐次确认'}，最多${event.policy.maxRounds}轮、${event.policy.maxToolCalls}次工具，累计用量阈值${event.policy.maxTokens}`;
+  } else if (event.type === 'model_start') {
     text = `第 ${event.round} 轮：等待模型决定下一步`;
     requests.push(event);
     modelView.textContent = JSON.stringify(requests.map(item => item.type === 'model_start' ? item.request : null), null, 2);
@@ -75,7 +97,7 @@ function showProgress(event: AgentEvent) {
   } else if (event.type === 'approval_required') {
     text = `第 ${event.round} 轮：等待你确认${event.proposal.action === 'edit' ? '修改' : '测试'}`;
     showApproval(event.proposal);
-  } else text = `停止：${event.reason === 'completed' ? '完成' : event.reason === 'max_rounds' ? '达到轮数上限' : '失败'}`;
+  } else text = `停止：${stopLabels[event.reason]}`;
   progress.push(text);
   progressView.textContent = progress.join('\n');
   status.textContent = text;
@@ -138,7 +160,9 @@ form.addEventListener('submit', async (event) => {
   const text = prompt.value.trim();
   if (!text || submit.disabled) return;
   const current: ChatMessage = { role: 'user', content: text };
-  const body: AskRequest = { messages: [...(includeHistory.checked ? messages : []), current] };
+  const body: AskRequest = { messages: [...(includeHistory.checked ? messages : []), current], policy: {
+    mode: policyMode.value as 'read_only' | 'confirm', maxRounds: Number(roundLimit.value), maxToolCalls: Number(toolLimit.value), maxTokens: Number(tokenLimit.value),
+  } };
   requestView.textContent = JSON.stringify(body, null, 2);
   responseView.textContent = '等待响应…';
   modelView.textContent = '等待后端返回组装后的模型请求…';
@@ -153,6 +177,8 @@ form.addEventListener('submit', async (event) => {
   submit.disabled = true;
   clear.disabled = includeHistory.disabled = true;
   submit.textContent = '等待回答…';
+  policyMode.disabled = roundLimit.disabled = toolLimit.disabled = tokenLimit.disabled = true;
+  taskId = undefined; cancel.disabled = true;
   try {
     const response = await fetch('/api/ask', {
       method: 'POST',
@@ -187,7 +213,7 @@ form.addEventListener('submit', async (event) => {
       : result.verification === 'stale' ? '代码已修改，尚未完成新的测试验证。' : '本次未运行测试。';
     metrics.textContent = `模型：${result.model} · 后端耗时：${result.durationMs} ms · ` +
       (result.usage ? `输入 ${result.usage.inputTokens} / 输出 ${result.usage.outputTokens} / 总计 ${result.usage.totalTokens} tokens` : '演示模式，无模型 token 用量');
-    status.textContent = `${result.stopReason === 'completed' ? '完成' : result.stopReason === 'max_rounds' ? '达到轮数上限，未完成' : '失败'} · ${result.rounds} 轮模型请求 · ${result.toolTraces.length} 次工具执行`;
+    status.textContent = `${stopLabels[result.stopReason]} · ${result.rounds} 轮模型请求 · ${result.toolTraces.length} 次工具执行`;
   } catch (error) {
     status.textContent = error instanceof Error ? error.message : '请求失败，请重试';
     answer.textContent = '本次未获得回答。';
@@ -196,6 +222,8 @@ form.addEventListener('submit', async (event) => {
   } finally {
     pendingApproval = undefined;
     approvalPanel.hidden = true;
+    taskId = undefined; cancel.disabled = true;
+    policyMode.disabled = roundLimit.disabled = toolLimit.disabled = tokenLimit.disabled = false;
     submit.disabled = false;
     clear.disabled = includeHistory.disabled = false;
     submit.textContent = '发送问题';

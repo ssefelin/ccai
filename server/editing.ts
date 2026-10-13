@@ -8,6 +8,7 @@ import type { ApprovalProposal, ToolTrace } from '../shared/api.ts';
 const root = fileURLToPath(new URL('../practice/', import.meta.url));
 const suite = fileURLToPath(new URL('../practice-tests/counter.test.ts', import.meta.url));
 type Confirm = (proposal: Omit<ApprovalProposal, 'id'>) => Promise<boolean>;
+const writing = new Set<string>();
 export const editTool: FunctionTool = {
   type: 'function', name: 'propose_edit', description: '提出 counter.ts 的完整替换内容。页面先展示差异并请求用户确认，确认后才写入；仅能修改 counter.ts。',
   parameters: { type: 'object', properties: { path: { type: 'string', enum: ['counter.ts'] }, content: { type: 'string' } }, required: ['path', 'content'], additionalProperties: false }, strict: true,
@@ -36,12 +37,13 @@ async function targetPath(practice = root) {
   if (path.relative(base, actual) !== 'counter.ts') throw new Error('修改目标必须在练习目录内。');
   return actual;
 }
-export async function applyProposal(value: unknown, confirm: Confirm, practice = root): Promise<ToolTrace['result']> {
+export async function applyProposal(value: unknown, confirm: Confirm, practice = root, signal = new AbortController().signal): Promise<ToolTrace['result']> {
   const args = value as { path?: unknown; content?: unknown };
   if (!args || args.path !== 'counter.ts' || Object.keys(args).some(key => !['path', 'content'].includes(key)) || typeof args.content !== 'string' || !args.content.trim() || Buffer.byteLength(args.content) > 16384) {
     return { ok: false, error: '仅允许修改 counter.ts，内容须为不超过16 KiB的非空文本。' };
   }
   try {
+    signal.throwIfAborted();
     const target = await targetPath(practice);
     const handle = await open(target, 'r');
     let before: string;
@@ -51,26 +53,39 @@ export async function applyProposal(value: unknown, confirm: Confirm, practice =
     } finally { await handle.close(); }
     if (before === args.content) return { ok: false, error: '内容没有变化，无需修改。' };
     const approved = await confirm({ action: 'edit', path: 'counter.ts', before, after: args.content, diff: lineDiff(before, args.content) });
+    signal.throwIfAborted();
     if (!approved) return { ok: false, error: '修改被拒绝、确认超时或连接已断开。', approvalDenied: true };
     if (await targetPath(practice) !== target) return { ok: false, error: '目标路径发生变化，请重新提出修改。' };
-    const writer = await open(target, 'r+');
+    if (writing.has(target)) return { ok: false, error: '另一个任务正在写入此文件，请稍后重试。' };
+    writing.add(target);
     try {
+      const writer = await open(target, 'r+');
+      try {
       if (!(await writer.stat()).isFile() || (await writer.stat()).size > 16384 || await writer.readFile('utf8') !== before) return { ok: false, error: '文件已被其他操作修改，请重新读取并提出修改。' };
       const bytes = Buffer.from(args.content);
+      signal.throwIfAborted();
       // readFile 已移动文件位置；从位置0覆盖，而不是在末尾追加。
-      await writer.write(bytes, 0, bytes.length, 0);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesWritten } = await writer.write(bytes, offset, bytes.length - offset, offset);
+        if (!bytesWritten) throw new Error('写入失败。');
+        offset += bytesWritten;
+      }
       await writer.truncate(bytes.length);
       await writer.sync();
-    } finally { await writer.close(); }
+      } finally { await writer.close(); }
+    } finally { writing.delete(target); }
     return { ok: true, path: 'counter.ts', applied: true };
   } catch { return { ok: false, error: '无法安全写入 counter.ts，请检查文件与目录。' }; }
 }
 
 export async function runPracticeTests(confirm: Confirm, signal: AbortSignal, practice = root, testSuite = suite): Promise<ToolTrace['result']> {
   try {
+    signal.throwIfAborted();
     await targetPath(practice);
     if (!await confirm({ action: 'test', path: 'counter.ts', before: '', after: '', diff: '运行固定测试：正数、负数、零的加法。测试会执行 counter.ts，最长10秒。' })) return { ok: false, error: '测试被拒绝、确认超时或连接已断开。', approvalDenied: true };
     const target = await targetPath(practice);
+    signal.throwIfAborted();
     const result = await new Promise<{ passed: boolean; exitCode: number | null; output: string }>(resolve => {
       // 固定命令与测试路径；不继承模型密钥，也不允许子进程写文件或启动其他进程。
       execFile(process.execPath, ['--permission', `--allow-fs-read=${path.dirname(target)}`, `--allow-fs-read=${path.dirname(testSuite)}`,
@@ -78,9 +93,10 @@ export async function runPracticeTests(confirm: Confirm, signal: AbortSignal, pr
         '--experimental-strip-types', '--input-type=module', '--eval', `await import(${JSON.stringify(pathToFileURL(testSuite).href)})`],
         { windowsHide: true, timeout: 10000, maxBuffer: 16384, signal,
           env: { SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP } },
-        (error, stdout, stderr) => resolve({ passed: !error, exitCode: error ? typeof error.code === 'number' ? error.code : null : 0,
+        (error, stdout, stderr) => resolve({ passed: !error && /(?:#|ℹ) tests [1-9]\d*/.test(stdout) && /(?:#|ℹ) fail 0\b/.test(stdout), exitCode: error ? typeof error.code === 'number' ? error.code : null : 0,
           output: (stdout + stderr).slice(0, 16000) || (error ? '测试进程未正常结束（超时、输出过大或取消）。' : '测试通过。') }));
     });
+    if (result.exitCode === null && !signal.aborted) return { ok: false, code: 'timeout', error: '测试进程超时或输出超过限制，已终止。' };
     return { ok: true, suite: 'counter 加法测试', ...result };
   } catch { return { ok: false, error: '无法运行固定测试。' }; }
 }
